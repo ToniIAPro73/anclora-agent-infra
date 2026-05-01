@@ -1,0 +1,21 @@
+# Runtime / logs / local state
+logs/
+runtime/
+*.log
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+
+# Python / Node
+__pycache__/
+.venv/
+venv/
+node_modules/
+
+# OS/editor
+.DS_Store
+.vscode/
