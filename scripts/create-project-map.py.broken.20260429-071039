@@ -1,0 +1,218 @@
+from pathlib import Path
+import json
+import subprocess
+from datetime import datetime, timezone
+
+home = Path.home()
+projects_dir = home / "projects"
+infra = home / "hermes" / "anclora-agent-infra"
+context_dir = infra / "context"
+context_dir.mkdir(parents=True, exist_ok=True)
+
+CORE_REPOS = {
+    "anclora-nexus": {
+        "role": "orquestacion_inteligencia",
+        "priority": "core",
+        "agent_owner": "director",
+    },
+    "anclora-content-generator-ai": {
+        "role": "contenido_rag_editorial",
+        "priority": "core",
+        "agent_owner": "content-strategist",
+    },
+    "anclora-data-lab": {
+        "role": "inteligencia_territorial_datalab",
+        "priority": "core",
+        "agent_owner": "datalab-intelligence",
+    },
+    "anclora-synergi": {
+        "role": "partners_admisiones_workspace",
+        "priority": "core",
+        "agent_owner": "synergi-admissions",
+    },
+    "anclora-private-estates": {
+        "role": "producto_private_estates",
+        "priority": "core",
+        "agent_owner": "repo-auditor",
+    },
+    "anclora-private-estates-landing": {
+        "role": "landing_publica_private_estates",
+        "priority": "core",
+        "agent_owner": "content-strategist",
+    },
+    "anclora-group": {
+        "role": "marca_grupo_contexto_corporativo",
+        "priority": "core",
+        "agent_owner": "director",
+    },
+}
+
+SUPPORT_REPOS = {
+    "anclora-agent-skills": "skills_operativos",
+    "anclora-awesome-skills": "biblioteca_skills",
+    "anclora-design-system": "sistema_diseno",
+    "anclora-portfolio": "portfolio",
+    "anclora-press": "prensa_comunicacion",
+    "anclora-advisor-ai": "advisor_ai",
+    "anclora-groundsync": "operaciones_groundsync",
+    "anclora-impulso": "producto_impulso",
+    "anclora-talent": "talento",
+    "anclora-linguo-cam": "producto_linguo_cam",
+    "anclora-azure-bay-landing": "landing_azure_bay",
+    "anclora-playa-viva-uniestate": "proyecto_playa_viva",
+}
+
+ARCHIVE_OR_SECONDARY = {
+    "anclora-private-estates-landing-backup": "backup_no_tocar_sin_confirmacion",
+    "antiopengravity": "referencia_externa_o_legacy",
+    "calculadora-fiscal-183": "producto_fiscal",
+    "calculadora-fiscal-183-premium": "producto_fiscal",
+    "calculadora-fiscal-183-premium-codex": "producto_fiscal",
+    "taxnomad-183-day-calculator": "producto_fiscal",
+    "caveman": "experimental_o_legacy",
+}
+
+def git_value(repo_path: Path, args: list[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), *args],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        value = result.stdout.strip()
+        return value or None
+    except Exception:
+        return None
+
+def git_dirty(repo_path: Path) -> bool | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "status", "--short"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return None
+
+def classify(name: str) -> dict:
+    if name in CORE_REPOS:
+        return CORE_REPOS[name]
+    if name in SUPPORT_REPOS:
+        return {
+            "role": SUPPORT_REPOS[name],
+            "priority": "support",
+            "agent_owner": "repo-auditor",
+        }
+    if name in ARCHIVE_OR_SECONDARY:
+        return {
+            "role": ARCHIVE_OR_SECONDARY[name],
+            "priority": "secondary",
+            "agent_owner": "repo-auditor",
+        }
+    return {
+        "role": "sin_clasificar",
+        "priority": "unknown",
+        "agent_owner": "director",
+    }
+
+def existing_path(repo_path: Path, child: str) -> str | None:
+    target = repo_path / child
+    return str(target) if target.exists() else None
+
+def detect_repo_metadata(repo_path: Path) -> dict:
+    name = repo_path.name
+    meta = classify(name)
+
+    return {
+        "name": name,
+        "path": str(repo_path),
+        "exists": repo_path.exists(),
+        "is_git_repo": (repo_path / ".git").exists(),
+        "branch": git_value(repo_path, ["branch", "--show-current"]),
+        "remote_origin": git_value(repo_path, ["remote", "get-url", "origin"]),
+        "has_uncommitted_changes": git_dirty(repo_path),
+        "classification": meta,
+        "files": {
+            "package_json": existing_path(repo_path, "package.json"),
+            "readme": existing_path(repo_path, "README.md"),
+            "agents_md": existing_path(repo_path, "AGENTS.md"),
+            "claude_md": existing_path(repo_path, "CLAUDE.md"),
+            "env_example": existing_path(repo_path, ".env.example"),
+        },
+        "dirs": {
+            "src": existing_path(repo_path, "src"),
+            "docs": existing_path(repo_path, "docs"),
+            "sdd": existing_path(repo_path, "sdd"),
+            "db": existing_path(repo_path, "db"),
+            "scripts": existing_path(repo_path, "scripts"),
+            "agent": existing_path(repo_path, ".agent"),
+            "agent_team": existing_path(repo_path, ".agent/team"),
+            "agent_skills": existing_path(repo_path, ".agent/skills"),
+            "antigravity": existing_path(repo_path, ".antigravity"),
+            "antigravity_team": existing_path(repo_path, ".antigravity/team"),
+            "antigravity_skills": existing_path(repo_path, ".antigravity/skills"),
+            "claude": existing_path(repo_path, ".claude"),
+        },
+    }
+
+if not projects_dir.exists():
+    raise SystemExit(f"No existe la carpeta projects: {projects_dir}")
+
+repo_paths = sorted({
+    git_dir.parent
+    for git_dir in projects_dir.glob("**/.git")
+    if git_dir.is_dir()
+})
+
+repos = {
+    repo_path.name: detect_repo_metadata(repo_path)
+    for repo_path in repo_paths
+}
+
+by_priority = {}
+for name, meta in repos.items():
+    priority = meta["classification"]["priority"]
+    by_priority.setdefault(priority, []).append(name)
+
+for names in by_priority.values():
+    names.sort()
+
+output = {
+    "schema_version": "2.0",
+    "created_at": datetime.now(timezone.utc).isoformat(),
+    "projects_dir": str(projects_dir),
+    "infra_dir": str(infra),
+    "repo_count": len(repos),
+    "repos": repos,
+    "by_priority": by_priority,
+    "policy": {
+        "no_duplicate_repos": True,
+        "read_only_first": True,
+        "no_secret_reading": True,
+        "no_production_changes_without_human_approval": True,
+        "do_not_touch_backups_without_confirmation": True,
+    },
+}
+
+target = context_dir / "projects.map.json"
+target.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+
+print(f"OK: mapa generado en {target}")
+print(f"Repos detectados: {len(repos)}")
+print()
+
+for priority in ["core", "support", "secondary", "unknown"]:
+    names = by_priority.get(priority, [])
+    if not names:
+        continue
+    print(f"{priority.upper()}:")
+    for name in names:
+        owner = repos[name]["classification"]["agent_owner"]
+        role = repos[name]["classification"]["role"]
+        print(f"  - {name} | {owner} | {role}")
+    print()
